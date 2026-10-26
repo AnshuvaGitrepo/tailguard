@@ -3,6 +3,21 @@
 All dates are 2026. Version numbers are in `go/main.go` (`toolVersion`) and
 `tailscale-audit.sh` (`TOOL_VERSION`).
 
+## 1.1.1 (27 Oct): follow-up review fixes
+
+- **Alpine/BusyBox false PASS fixed.** BusyBox's `timeout` doesn't exit 124 when the
+  limit hits: it kills `grep` with TERM, so the shell sees 143. The `.sh` only
+  checked for 124, so a key search cut short on Alpine could report "no keys
+  found". Any exit code above 2 (`grep` only uses 0–2) now counts as unfinished
+  (UNKNOWN). New test: a BusyBox-style fake `timeout` must give UNKNOWN. The
+  1.1.0 script gave PASS with it.
+- **C13 when Tailscale SSH is off** is now always INFO ("not needed"), even if the
+  `tailscaled` process can't be found.
+- **Scripts are executable in the repo** (they were stored without the executable flag, so `./tailscale-audit.sh` and the tests failed on a fresh Linux clone). The README now uses `sudo bash tailscale-audit.sh`, which also works on a downloaded file.
+- **Port-forwarding card** gained a final step: you can ignore it if C13 shows PASS
+  on every Linux server the SSH rules reach. The policy file can't see servers, so
+  the warning always appears.
+
 ## 1.1.0 (27 Oct): fixes from an outside review
 
 - **New check C13: SSH forwarding off-switch.** It looks for `TS_SSH_DISABLE_FORWARDING`

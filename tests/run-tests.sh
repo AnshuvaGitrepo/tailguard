@@ -193,5 +193,18 @@ echo "case errors: bad flag exit=$rc1, broken policy exit=$rc2"
 [ "$rc2" = 2 ] && ok || bad "broken policy: exit $rc2, want 2"
 rm -rf "$out"
 
+# BusyBox's timeout kills grep with TERM (exit 143) instead of exiting 124.
+# A scan cut short that way must give C10 UNKNOWN, never a false PASS.
+if [ "$MODE" = sh ]; then
+	out=$(mktemp -d)
+	PATH="$HERE/fake-busybox-timeout:$PATH" run_tool safe "" "$out"
+	json=$(find "$out" -maxdepth 1 -name 'tailscale-audit-*.json' | head -n1)
+	c10=$("$PY" -c 'import json, sys
+print(next(f["status"] for f in json.load(open(sys.argv[1], encoding="utf-8"))["findings"] if f["id"] == "C10"))' "$json" | tr -d '\r')
+	echo "case busybox-timeout: C10=$c10"
+	[ "$c10" = UNKNOWN ] && ok || bad "busybox-style timeout: C10=$c10, want UNKNOWN"
+	rm -rf "$out"
+fi
+
 echo "passed: $PASSED  failed: $FAILED"
 [ "$FAILED" -eq 0 ]

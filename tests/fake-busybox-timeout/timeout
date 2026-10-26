@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake BusyBox-style timeout for tests. BusyBox doesn't exit 124 when the limit
+# hits: it kills the command with TERM, so the shell sees 143. The script's
+# availability probe ("timeout 1 true") succeeds; every real run is "killed".
+[ "${2:-}" = true ] && exit 0
+exit 143

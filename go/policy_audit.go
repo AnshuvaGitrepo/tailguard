@@ -181,7 +181,8 @@ func auditPolicy(data []byte) (*PolicyResult, error) {
 			Why:     "So assume anyone these SSH rules let in can tunnel to hidden services on the device. Tailworm uses this to become root.",
 			Steps: []string{"Treat every SSH rule as if it gives full admin access, and keep each one as narrow as possible.",
 				"On every Linux server that accepts Tailscale SSH, turn on the forwarding off-switch: " + fwdVar + "=1 on tailscaled (see the forwarding check when you run this tool there).",
-				"For the most important servers, you can instead turn off Tailscale SSH (" + sudo + "tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."}})
+				"For the most important servers, you can instead turn off Tailscale SSH (" + sudo + "tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config.",
+				"You can ignore this warning if the forwarding check (C13) shows PASS on every Linux server these SSH rules reach. The policy file can't see your servers, so this warning always appears."}})
 	}
 
 	for _, sect := range []string{"nodeAttrs", "grants"} {

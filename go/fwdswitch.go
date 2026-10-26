@@ -141,7 +141,7 @@ func classifyFwd(st fwdState, ssh string, windows bool) Finding {
 		f.Why = "Tailworm uses SSH port forwarding to reach hidden services on the device and become root."
 		f.MoreHelp = fwdHelp
 		f.Steps = fwdSteps
-	case ssh == "off" && st.daemonFound:
+	case ssh == "off": // nothing to forward through, whether or not tailscaled could be inspected
 		f.Status, f.Title = "INFO", "SSH forwarding off-switch: not needed now (Tailscale SSH is off)"
 		f.Detail = fwdVar + " not active"
 		f.Problem = "If you ever turn Tailscale SSH on for this device, turn this switch on too."

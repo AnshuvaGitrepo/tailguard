@@ -13,7 +13,7 @@
 
 set -u
 
-TOOL_VERSION="1.1.0"
+TOOL_VERSION="1.1.1"
 MIN_SAFE_VERSION="1.98.9"
 
 POLICY_FILE=""
@@ -823,7 +823,8 @@ else
 			"Create the file /etc/systemd/system/tailscaled.service.d/50-disable-ssh-forwarding.conf with two lines: [Service] and Environment=$FWD_VAR=1" \
 			"$FWD_S3" \
 			"Note: this is an undocumented Tailscale setting (a stopgap until the fix ships). It blocks TCP and Unix-socket forwarding, not SSH agent forwarding."
-	elif [ "$SSH_STATE" = off ] && [ "$FWD_FOUND" -eq 1 ]; then
+	elif [ "$SSH_STATE" = off ]; then
+		# Nothing to forward through, whether or not tailscaled could be inspected.
 		info C13 "$C13" "SSH forwarding off-switch: not needed now (Tailscale SSH is off)" "$FWD_VAR not active" \
 			"If you ever turn Tailscale SSH on for this device, turn this switch on too."
 	elif [ "$FWD_FOUND" -eq 0 ]; then
@@ -872,7 +873,9 @@ for p in "${SCAN[@]}"; do
 	# shellcheck disable=SC2086 # GREP_I is empty or one flag
 	"${LIMIT[@]+"${LIMIT[@]}"}" grep -rsoE $GREP_I --exclude-dir=.cache --exclude-dir=node_modules --exclude-dir=.git \
 		'tskey-[A-Za-z0-9_-]{8,}' "$p" >>"$TMP/keys" 2>/dev/null
-	[ $? -eq 124 ] && SCAN_INCOMPLETE+=("$p")
+	# grep itself only exits 0, 1 or 2. Anything higher means the limit hit:
+	# GNU timeout exits 124, BusyBox's kills grep with TERM (shell sees 143).
+	[ $? -gt 2 ] && SCAN_INCOMPLETE+=("$p")
 done
 if [ "$IS_ROOT" -eq 0 ] && [ -z "${TAILGUARD_SCAN_ROOTS:-}" ]; then
 	SKIPPED+=("unreadable files under /etc /root /var/spool/cron (not root)")
@@ -1086,7 +1089,8 @@ if [ -n "$POLICY_FILE" ]; then
 			"" "Keep SSH rules narrow and turn on the SSH forwarding off-switch on servers" \
 			"Treat every SSH rule as if it gives full admin access, and keep each one as narrow as possible." \
 			"On every Linux server that accepts Tailscale SSH, turn on the forwarding off-switch: $FWD_VAR=1 on tailscaled (see the forwarding check when you run this tool there)." \
-			"For the most important servers, you can instead turn off Tailscale SSH (${SUDO}tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."
+			"For the most important servers, you can instead turn off Tailscale SSH (${SUDO}tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config." \
+			"You can ignore this warning if the forwarding check (C13) shows PASS on every Linux server these SSH rules reach. The policy file can't see your servers, so this warning always appears."
 		GROUP="" REF=""
 	done
 

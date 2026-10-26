@@ -37,10 +37,12 @@ Both tools only read. They never change a Tailscale setting.
 ## Usage
 
 ```bash
-sudo ./tailscale-audit.sh                          # local checks
-sudo ./tailscale-audit.sh --policy policy.hujson   # + policy audit
-./tailscale-audit.sh --no-color --out /tmp/reports
+sudo bash tailscale-audit.sh                          # local checks
+sudo bash tailscale-audit.sh --policy policy.hujson   # + policy audit
+bash tailscale-audit.sh --no-color --out /tmp/reports
 ```
+(`bash script` works on a fresh download. To use `./tailscale-audit.sh`, run
+`chmod +x tailscale-audit.sh` first, because browsers don't keep the executable flag.)
 
 ```powershell
 # Run from an Administrator prompt for the full auth-key scan
@@ -108,7 +110,7 @@ If a command or JSON field is missing, the result is **UNKNOWN**, never PASS.
 | C10 | Auth keys (`tskey-`) stored on disk | WARN, key always masked to 10 chars |
 | C11 | Peers advertising Tailscale SSH (`sshHostKeys`) | INFO (blast radius) |
 | C12 | Running as root/Administrator | INFO, lists what was skipped |
-| C13 | SSH forwarding off-switch (`TS_SSH_DISABLE_FORWARDING` on the running `tailscaled`) | Linux: PASS if active; WARN if Tailscale SSH is on without it, or if it's set in config but `tailscaled` wasn't restarted; UNKNOWN without root. Windows: INFO (no Tailscale SSH server) |
+| C13 | SSH forwarding off-switch (`TS_SSH_DISABLE_FORWARDING` on the running `tailscaled`) | Linux: PASS if active; WARN if Tailscale SSH is on without it, or if it's set in config but `tailscaled` wasn't restarted; INFO when Tailscale SSH is off; UNKNOWN without root. Windows: INFO (no Tailscale SSH server) |
 
 **About C13.** `TS_SSH_DISABLE_FORWARDING` is read by `tailscaled`
 ([`ssh/tailssh`](https://github.com/tailscale/tailscale/blob/main/ssh/tailssh/tailssh.go))
@@ -134,7 +136,7 @@ The only tailscale commands run are `version`, `status --json`, `debug prefs`,
 Windows: `%ProgramData%` (6 levels), the user profile (5 levels), PowerShell
 history, and `C:\Windows\System32\Tasks` (scheduled tasks; Administrator only).
 Files over 2 MB and binary files are skipped. Both tools stop searching a folder
-after 60 s (the `.sh` uses `timeout` where available), and Windows searches the
+after 60 s (the `.sh` uses `timeout` where available, GNU or BusyBox), and Windows searches the
 small, high-value places first. If a folder doesn't finish and no key was found,
 C10 is UNKNOWN, not PASS.
 
@@ -188,7 +190,7 @@ bash tests/run-tests.sh compare ./tailscale-audit.exe tests/fakets/tailscale.exe
 (cd go && go vet ./... && go test ./...)
 shellcheck tailscale-audit.sh tests/*.sh tests/fake-tailscale/tailscale
 ```
-Expected: 140 passed for each of the four `sh`/`exe` runs, 7 for `compare`,
+Expected: 141 passed for each `sh` run (including a BusyBox-style `timeout` test), 140 for `exe`, 7 for `compare`,
 `go vet` and `go test` clean, and no shellcheck output.
 
 Fixtures: `risky` (old version, SSH on, headscale, no lock, unix-socket serve,

@@ -41,6 +41,7 @@ func TestClassifyFwd(t *testing.T) {
 		{"ssh on, not set", fwdState{daemonFound: true, envRead: true}, "on", false, "WARN"},
 		{"ssh off", fwdState{daemonFound: true, envRead: true}, "off", false, "INFO"},
 		{"ssh off, not root", fwdState{daemonFound: true}, "off", false, "INFO"},
+		{"ssh off, no daemon", fwdState{}, "off", false, "INFO"},
 		{"no daemon", fwdState{}, "on", false, "UNKNOWN"},
 		{"not root", fwdState{daemonFound: true}, "on", false, "UNKNOWN"},
 		{"ssh unknown", fwdState{daemonFound: true, envRead: true}, "unknown", false, "UNKNOWN"},
