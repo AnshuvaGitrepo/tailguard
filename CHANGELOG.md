@@ -3,6 +3,30 @@
 All dates are 2026. Version numbers are in `go/main.go` (`toolVersion`) and
 `tailscale-audit.sh` (`TOOL_VERSION`).
 
+## 1.1.0 (27 Oct): fixes from an outside review
+
+- **New check C13: SSH forwarding off-switch.** It looks for `TS_SSH_DISABLE_FORWARDING`
+  in the running `tailscaled`'s environment (Linux, needs root) and in its config
+  files. It tells apart "on", "set but tailscaled not restarted", "Tailscale SSH on
+  without it", and "can't read". On Windows it's INFO, because the Tailscale SSH
+  server doesn't run there. The variable is in Tailscale's source but undocumented,
+  so the fix steps say it's a stopgap and that it doesn't block agent forwarding.
+- **Softer port-forwarding wording.** "Can't be blocked from your policy" is now
+  "isn't controlled by any documented policy setting". It notes the reported (but
+  undocumented) hosted per-rule switch and points to C13.
+- **Tag rule.** One source to one `tag:` is now a **WARN** ("make sure only one
+  device has this tag") instead of a FAIL, so the fix example passes its own check.
+  `*`, `autogroup:member`, `autogroup:tagged`, `group:` and multiple entries are
+  still FAIL.
+- **Auto-update unset.** When `AutoUpdate.Apply` is not set, the device follows
+  the tailnet default, which is now read from `Self.CapMap` (`default-auto-update`).
+  It reports on or off from that, or UNKNOWN if the default isn't reported,
+  instead of saying "off".
+- **Bash key scan time limit.** Each folder now stops after 60 s (via `timeout`),
+  and an unfinished folder makes C10 UNKNOWN, matching the Go tool.
+- **Tests.** A new `server` fixture, fake daemon environments, and Go unit tests for
+  the off-switch logic (including "set but not restarted").
+
 ## 1.0.0 (26 Oct): first release, built in one session
 
 **Initial build**

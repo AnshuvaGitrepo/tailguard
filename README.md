@@ -99,15 +99,31 @@ If a command or JSON field is missing, the result is **UNKNOWN**, never PASS.
 | C01 | Tailscale version | FAIL below 1.98.9; otherwise WARN (Tailworm unpatched) |
 | C02 | Daemon running and logged in (`BackendState`) | FAIL if NeedsLogin/Stopped/unreachable |
 | C03 | Tailscale SSH server on this node (`RunSSH`) | WARN if on |
-| C04 | Control server (`ControlURL`) | WARN for custom/headscale: forwarding cannot be disabled, so every SSH grant = root |
+| C04 | Control server (`ControlURL`) | WARN for custom/headscale: forwarding can't be turned off from the policy, so every SSH grant = root |
 | C05 | Tailnet Lock (`tailscale lock status`) | FAIL if off |
 | C06 | Node key expiry (`Self.KeyExpiry`) | WARN if disabled |
-| C07 | Auto-updates (`AutoUpdate.Apply`) | WARN if off |
+| C07 | Auto-updates (`AutoUpdate.Apply`; if unset, the tailnet default from `Self.CapMap`) | WARN if off; UNKNOWN if unset and the tailnet default isn't reported |
 | C08 | `tailscale serve` Unix-socket targets (`unix:`) | FAIL |
 | C09 | App connector (`AppConnector.Advertise`) | WARN; C09R subnet routes and C09E exit node as INFO |
 | C10 | Auth keys (`tskey-`) stored on disk | WARN, key always masked to 10 chars |
 | C11 | Peers advertising Tailscale SSH (`sshHostKeys`) | INFO (blast radius) |
 | C12 | Running as root/Administrator | INFO, lists what was skipped |
+| C13 | SSH forwarding off-switch (`TS_SSH_DISABLE_FORWARDING` on the running `tailscaled`) | Linux: PASS if active; WARN if Tailscale SSH is on without it, or if it's set in config but `tailscaled` wasn't restarted; UNKNOWN without root. Windows: INFO (no Tailscale SSH server) |
+
+**About C13.** `TS_SSH_DISABLE_FORWARDING` is read by `tailscaled`
+([`ssh/tailssh`](https://github.com/tailscale/tailscale/blob/main/ssh/tailssh/tailssh.go))
+and checked before the policy in every TCP and Unix-socket forwarding path. It is
+**undocumented**: a stopgap until the Tailworm fix ships. It does not block SSH
+agent forwarding. The tool reads the running daemon's environment
+(`/proc/<pid>/environ`, needs root) and the usual config files (`/etc/default/tailscaled`,
+`/etc/sysconfig/tailscaled`, `tailscaled.service.d/*.conf`). To turn it on with
+systemd (keep another way in first):
+
+```bash
+sudo mkdir -p /etc/systemd/system/tailscaled.service.d
+printf '[Service]\nEnvironment=TS_SSH_DISABLE_FORWARDING=1\n' | sudo tee /etc/systemd/system/tailscaled.service.d/50-disable-ssh-forwarding.conf
+sudo systemctl daemon-reload && sudo systemctl restart tailscaled
+```
 
 The only tailscale commands run are `version`, `status --json`, `debug prefs`,
 `serve status --json` and `lock status`. The tests prove that no other command is called.
@@ -117,31 +133,35 @@ The only tailscale commands run are `version`, `status --json`, `debug prefs`,
 `/opt/scripts`, and `/home/*` shell histories, rc files, `*.sh` and `bin/`.
 Windows: `%ProgramData%` (6 levels), the user profile (5 levels), PowerShell
 history, and `C:\Windows\System32\Tasks` (scheduled tasks; Administrator only).
-Files over 2 MB and binary files are skipped. Windows searches the small,
-high-value places first, with a 60 s limit per folder. If a folder doesn't
-finish and no key was found, C10 is UNKNOWN, not PASS.
+Files over 2 MB and binary files are skipped. Both tools stop searching a folder
+after 60 s (the `.sh` uses `timeout` where available), and Windows searches the
+small, high-value places first. If a folder doesn't finish and no key was found,
+C10 is UNKNOWN, not PASS.
 
 ### Policy audit (`--policy`)
 
 - Lists every `ssh` rule with src, dst, users and action.
 - **FAIL**: a broad rule. That means src or dst uses `*`, `autogroup:member`,
-  `autogroup:tagged`, any `group:` or any `tag:`, or has more than one entry
-  on either side. Use single source-to-destination pairs.
+  `autogroup:tagged` or any `group:`, or has more than one entry on either
+  side. Use single source-to-destination pairs.
+- **WARN**: one source to one `tag:`. That's a single pair only if exactly one
+  device has the tag, which the policy file can't show, so check it in the admin console.
 - **WARN**: `users` includes `root`.
 - **WARN**: `action: accept`. Use `check`.
-- **WARN**: on every ssh rule, because port forwarding can't be turned off
-  from the policy file (see below).
+- **WARN**: on every ssh rule, because no documented policy setting turns off
+  port forwarding (see below).
 - **WARN**: `tailscale.com/app-connectors` in `nodeAttrs` or `grants`.
 - **WARN**: an allow-all ACL (`*` to `*:*`) or an allow-all grant (`*`/`*`/ip `*`).
 
-**About port forwarding.** I checked Tailscale's docs (kb/1337 policy syntax,
-kb/1193 Tailscale SSH, Oct 26 2026). They list no `ssh`-rule field that disables
-port forwarding. The real switches, `allowLocalPortForwarding` and
-`allowRemotePortForwarding`, exist only in the control-to-node protocol
-(`tailcfg.SSHAction`), not in the policy file. The tool does not invent a field.
-It reports that this can't be confirmed, and recommends treating each SSH grant
-as root-equivalent. Where forwarding must be off, use OpenSSH with
-`AllowTcpForwarding no` and `AllowStreamLocalForwarding no`.
+**About port forwarding.** Tailscale's policy reference (kb/1337 policy syntax,
+kb/1193 Tailscale SSH, checked 26–27 Oct 2026) documents no `ssh`-rule field that
+disables port forwarding. The node protocol does carry per-rule flags
+(`allowLocalPortForwarding` / `allowRemotePortForwarding` in `tailcfg.SSHAction`),
+and reports say the hosted service can set them per rule, but that isn't
+documented yet. The tool doesn't invent a field name. It warns, recommends treating
+each SSH grant as root-equivalent, and points to the host-level off-switch (C13).
+Where forwarding must be off and you don't want to rely on an undocumented switch,
+use OpenSSH with `AllowTcpForwarding no` and `AllowStreamLocalForwarding no`.
 
 ## JSON parsing in the bash script
 
@@ -168,12 +188,14 @@ bash tests/run-tests.sh compare ./tailscale-audit.exe tests/fakets/tailscale.exe
 (cd go && go vet ./... && go test ./...)
 shellcheck tailscale-audit.sh tests/*.sh tests/fake-tailscale/tailscale
 ```
-Expected: 117 passed for each of the four `sh`/`exe` runs, 6 for `compare`,
+Expected: 140 passed for each of the four `sh`/`exe` runs, 7 for `compare`,
 `go vet` and `go test` clean, and no shellcheck output.
 
 Fixtures: `risky` (old version, SSH on, headscale, no lock, unix-socket serve,
-app connector, exit node, planted fake keys), `safe` (everything good), and
-`unknown` (odd version string, missing `debug prefs` and `serve` commands).
+app connector, exit node, fake keys written at test time, no forwarding switch),
+`safe` (everything good), `unknown` (odd version string, missing `debug prefs` and
+`serve` commands), and `server` (Linux server with Tailscale SSH on,
+auto-update unset but on via the tailnet default, forwarding off-switch active).
 Sample policies: `bad`, `mixed` and `good`. Expected results are in
 `tests/expected.txt`. The tests also check:
 - exit codes
@@ -184,8 +206,9 @@ Sample policies: `bad`, `mixed` and `good`. Expected results are in
   `tests/compare_output.py`)
 
 **Test env hooks:** `TAILGUARD_TAILSCALE` (path to tailscale),
-`TAILGUARD_SCAN_ROOTS` (replace the key-search paths), and `TAILGUARD_JSON`
-(bash only: `jq|python|awk`).
+`TAILGUARD_SCAN_ROOTS` (replace the key-search paths), `TAILGUARD_FWD_ROOT`
+(stands in for `/`: `ROOT/environ` is the daemon's environment, config files are read
+under `ROOT/etc/...`), and `TAILGUARD_JSON` (bash only: `jq|python|awk`).
 
 ## Walkthrough
 

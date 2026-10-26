@@ -1,0 +1,2 @@
+PATH=/usr/sbin:/usr/bin
+TS_SSH_DISABLE_FORWARDING=1

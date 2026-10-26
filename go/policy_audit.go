@@ -108,24 +108,39 @@ func auditPolicy(data []byte) (*PolicyResult, error) {
 		r.SSHRules = append(r.SSHRules, sr)
 		sTxt, dTxt, uTxt := strings.Join(src, ", "), strings.Join(dst, ", "), strings.Join(users, ", ")
 
-		var broad []string
-		for _, x := range src {
-			if isBroad(x) {
-				broad = append(broad, "src:"+x)
-			}
-		}
-		for _, x := range dst {
-			if isBroad(x) {
-				broad = append(broad, "dst:"+x)
+		// broad lists everything wide (tags too, for the details line); hard is
+		// set by anything other than a single tag, which makes the rule a FAIL.
+		var broad, tags []string
+		hard := false
+		for _, side := range []struct {
+			name string
+			list []string
+		}{{"src", src}, {"dst", dst}} {
+			for _, x := range side.list {
+				switch {
+				case isBroad(x):
+					broad, hard = append(broad, side.name+":"+x), true
+				case isTag(x):
+					broad, tags = append(broad, side.name+":"+x), append(tags, side.name+":"+x)
+				}
 			}
 		}
 		if len(src) > 1 {
-			broad = append(broad, fmt.Sprintf("%d-sources", len(src)))
+			broad, hard = append(broad, fmt.Sprintf("%d-sources", len(src))), true
 		}
 		if len(dst) > 1 {
-			broad = append(broad, fmt.Sprintf("%d-destinations", len(dst)))
+			broad, hard = append(broad, fmt.Sprintf("%d-destinations", len(dst))), true
 		}
-		if len(broad) > 0 {
+		if !hard && len(tags) > 0 {
+			add(Finding{ID: fmt.Sprintf("P-SSH-%d-TAG", n), Status: "WARN", Check: fmt.Sprintf("ssh rule #%d uses a tag", n),
+				Title: fmt.Sprintf("SSH rule %d uses a tag: make sure only one device has it", n), Next: fmt.Sprintf("Check that the tag in SSH rule %d is on only one device", n),
+				Detail:  fmt.Sprintf("src=[%s] dst=[%s]; tag: %s", sTxt, dTxt, strings.Join(tags, " ")),
+				Problem: fmt.Sprintf("It lets %s log in to %s. That is a single person-to-device pair only if exactly one device has this tag.", plainList(src, false), plainList(dst, true)),
+				Why:     "If several devices share the tag, one hacked device can use this rule to reach all of them.",
+				Steps: []string{"In the admin console (Machines), filter by this tag and check that only one device has it.",
+					"If several do, give the server its own tag (for example tag:web-01) and use that in this rule."}})
+		}
+		if hard {
 			problem := fmt.Sprintf("It lets %s log in to %s.", plainList(src, false), plainList(dst, true))
 			if len(dst) == 1 && dst[0] == "autogroup:self" {
 				problem += " Each person can only reach devices they own, so this is Tailscale's default and lower risk than most broad rules, but it is still more than one person-to-device pair."
@@ -137,7 +152,7 @@ func auditPolicy(data []byte) (*PolicyResult, error) {
 				Why:     "If any one of those devices is hacked, the attacker can use this rule to get into the others. This is how Tailworm spreads.",
 				Steps: []string{"If you don't use Tailscale SSH (see the 'devices accept Tailscale SSH' line in this report), delete this rule from the \"ssh\" section of your policy.",
 					"If you do use it, replace it with one rule for each person and the one device they need, for example: {\"action\": \"check\", \"src\": [\"you@example.com\"], \"dst\": [\"tag:my-server\"], \"users\": [\"autogroup:nonroot\"]}",
-					"Note: this check also flags any tag: or group: in a rule, because one tag or group can cover many devices or people."}})
+					"A rule with one person and one tag like this only gets a lighter warning, as long as exactly one device has that tag."}})
 		}
 		if contains(users, "root") {
 			add(Finding{ID: fmt.Sprintf("P-SSH-%d-ROOT", n), Status: "WARN", Check: fmt.Sprintf("ssh rule #%d allows root", n),
@@ -158,14 +173,15 @@ func auditPolicy(data []byte) (*PolicyResult, error) {
 					"Optionally add \"checkPeriod\": \"1h\" so the confirmation is asked again every hour."}})
 		}
 		add(Finding{ID: fmt.Sprintf("P-SSH-%d-FWD", n), Status: "WARN", Check: fmt.Sprintf("ssh rule #%d cannot disable port forwarding", n),
-			Title: "SSH port forwarding can't be blocked from your policy", Next: "Keep SSH rules narrow; on important servers use OpenSSH with forwarding turned off",
+			Title: "SSH port forwarding isn't controlled by any documented policy setting", Next: "Keep SSH rules narrow and turn on the SSH forwarding off-switch on servers",
 			Group:   "fwd",
 			Ref:     fmt.Sprintf("SSH rule %d", n),
 			Detail:  fwdNote,
-			Problem: "Tailscale's policy file has no setting to block SSH port forwarding (checked in Tailscale's documentation on 26 Oct 2026).",
-			Why:     "So anyone these SSH rules let in can tunnel to hidden services on the device. Tailworm uses this to become root.",
+			Problem: "Tailscale's documented policy settings can't block SSH port forwarding (checked 26-27 Oct 2026). Reports say the hosted service has a per-rule switch, but it isn't documented yet.",
+			Why:     "So assume anyone these SSH rules let in can tunnel to hidden services on the device. Tailworm uses this to become root.",
 			Steps: []string{"Treat every SSH rule as if it gives full admin access, and keep each one as narrow as possible.",
-				"For important servers, turn off Tailscale SSH on them (" + sudo + "tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."}})
+				"On every Linux server that accepts Tailscale SSH, turn on the forwarding off-switch: " + fwdVar + "=1 on tailscaled (see the forwarding check when you run this tool there).",
+				"For the most important servers, you can instead turn off Tailscale SSH (" + sudo + "tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."}})
 	}
 
 	for _, sect := range []string{"nodeAttrs", "grants"} {

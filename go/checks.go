@@ -159,7 +159,7 @@ func runLocalChecks(a *Audit, prog *Progress) {
 			Detail: "tailscale CLI not found on PATH or in Program Files"})
 		for _, c := range [][2]string{{"C02", "Daemon running and logged in"}, {"C03", "Tailscale SSH server"}, {"C04", "Control server"},
 			{"C05", "Tailnet Lock"}, {"C06", "Node key expiry"}, {"C07", "Auto-updates"}, {"C08", "Serve Unix-socket targets"},
-			{"C09", "App connector"}, {"C11", "Peers with Tailscale SSH"}} {
+			{"C09", "App connector"}, {"C11", "Peers with Tailscale SSH"}, {"C13", "SSH forwarding off-switch"}} {
 			a.add(unknown(c[0], c[1], "Skipped: "+c[1]+" (Tailscale not found)", "skipped: tailscale CLI not found",
 				"The tailscale command could not be found.", "Install Tailscale, or put the tailscale command on PATH, then run this check again."))
 		}
@@ -331,9 +331,11 @@ func localTailscaleChecks(a *Audit, ts string, prog *Progress) {
 
 	// 3. Tailscale SSH server
 	const c3 = "Tailscale SSH server"
+	sshState := "unknown" // used by check 13
 	if v, ok := pref("RunSSH"); !ok || (v != true && v != false) {
 		a.add(prefsUnknown("C03", c3, "Could not check whether Tailscale SSH is on", "RunSSH"))
 	} else if v == true {
+		sshState = "on"
 		a.add(Finding{ID: "C03", Status: "WARN", Check: c3, Title: "Tailscale SSH is turned on for this device", Next: "Turn off Tailscale SSH on this device if you don't need it",
 			Detail:   "RunSSH=true",
 			Problem:  "Other devices in your network can open a remote command line on this device through Tailscale SSH.",
@@ -341,8 +343,9 @@ func localTailscaleChecks(a *Audit, ts string, prog *Progress) {
 			MoreHelp: "https://tailscale.com/kb/1193/tailscale-ssh",
 			Steps: []string{"First make sure you have another way in (sitting at it, or normal SSH).",
 				"If you don't use Tailscale SSH to reach this device, turn it off: " + sudo + "tailscale set --ssh=false",
-				"If you need it, keep the SSH rules in your policy as narrow as possible (one person to this one device)."}})
+				"If you need it, keep the SSH rules in your policy as narrow as possible (one person to this one device), and turn on the SSH forwarding off-switch (see the forwarding check)."}})
 	} else {
+		sshState = "off"
 		a.add(Finding{ID: "C03", Status: "PASS", Check: c3, Title: "Tailscale SSH is turned off on this device", Detail: "RunSSH=false"})
 	}
 
@@ -364,10 +367,11 @@ func localTailscaleChecks(a *Audit, ts string, prog *Progress) {
 			a.add(Finding{ID: "C04", Status: "WARN", Check: c4, Title: "Managed by a self-hosted server (headscale?)", Next: "Treat every SSH permission as full admin access (headscale)",
 				Detail:  "ControlURL=" + raw,
 				Problem: "This device is managed by " + raw + ", not by Tailscale's own service.",
-				Why:     "On headscale, SSH port forwarding can't be turned off, so anyone allowed to SSH into a device can become its administrator (root).",
+				Why:     "On headscale, SSH port forwarding can't be turned off from the policy, so anyone allowed to SSH into a device can become its administrator (root).",
 				Steps: []string{"Treat every SSH permission in your policy as full admin access.",
 					"Allow SSH only from one person or device to one server at a time.",
-					"For important servers, turn off Tailscale SSH and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."}})
+					"On every server that accepts Tailscale SSH, turn on the forwarding off-switch: " + fwdVar + "=1 on tailscaled (see the forwarding check).",
+					"For the most important servers, you can instead turn off Tailscale SSH and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."}})
 		}
 	}
 
@@ -428,17 +432,46 @@ func localTailscaleChecks(a *Audit, ts string, prog *Progress) {
 
 	// 7. auto-updates
 	const c7 = "Auto-updates"
+	updOff := func(title, detail string) Finding {
+		return Finding{ID: "C07", Status: "WARN", Check: c7, Title: title, Next: "Turn on automatic updates",
+			Detail:   detail,
+			Problem:  "Tailscale will not install security fixes by itself.",
+			Why:      "When the Tailworm fix is released, this device stays unprotected until someone updates it by hand.",
+			MoreHelp: "https://tailscale.com/kb/1067/update",
+			Steps:    []string{"Turn on automatic updates: " + sudo + "tailscale set --auto-update"}}
+	}
 	if v, ok := pref("AutoUpdate", "Apply"); !ok {
 		a.add(prefsUnknown("C07", c7, "Could not check automatic updates", "AutoUpdate.Apply"))
 	} else if v == true {
 		a.add(Finding{ID: "C07", Status: "PASS", Check: c7, Title: "Automatic updates are on", Detail: "AutoUpdate.Apply=true"})
+	} else if v == false {
+		a.add(updOff("Automatic updates are off", "AutoUpdate.Apply=false"))
+	} else if v == nil {
+		// Not set on the device: the tailnet-wide default applies (Self.CapMap "default-auto-update").
+		def, defOK := any(nil), false
+		if statusOK && selfOK {
+			if list, ok := get(status, "Self", "CapMap", "default-auto-update"); ok {
+				if l, _ := list.([]any); len(l) > 0 {
+					def, defOK = l[0], l[0] == true || l[0] == false
+				}
+			}
+		}
+		switch {
+		case defOK && def == true:
+			a.add(Finding{ID: "C07", Status: "PASS", Check: c7, Title: "Automatic updates are on (tailnet default)",
+				Detail: "AutoUpdate.Apply not set; tailnet default-auto-update=true"})
+		case defOK:
+			a.add(updOff("Automatic updates are off (tailnet default)", "AutoUpdate.Apply not set; tailnet default-auto-update=false"))
+		default:
+			a.add(unknown("C07", c7, "Automatic updates: not set on this device (using the tailnet default)",
+				"AutoUpdate.Apply not set; tailnet default not reported",
+				"This device follows the tailnet-wide default, and the tool couldn't read what that default is.",
+				"Turn them on for this device to be sure: "+sudo+"tailscale set --auto-update",
+				"Or check the tailnet-wide auto-update setting in the admin console."))
+		}
 	} else {
-		a.add(Finding{ID: "C07", Status: "WARN", Check: c7, Title: "Automatic updates are off", Next: "Turn on automatic updates",
-			Detail:   "AutoUpdate.Apply=" + str(v),
-			Problem:  "Tailscale will not install security fixes by itself.",
-			Why:      "When the Tailworm fix is released, this device stays unprotected until someone updates it by hand.",
-			MoreHelp: "https://tailscale.com/kb/1067/update",
-			Steps:    []string{"Turn on automatic updates: " + sudo + "tailscale set --auto-update"}})
+		a.add(unknown("C07", c7, "Could not check automatic updates", "AutoUpdate.Apply="+str(v),
+			"Tailscale reported an unexpected value: "+str(v), "Check it by hand: tailscale debug prefs (look for AutoUpdate)."))
 	}
 
 	// 8. serve Unix-socket targets
@@ -544,6 +577,11 @@ func localTailscaleChecks(a *Audit, ts string, prog *Progress) {
 		a.add(unknown("C11", c11, "Could not count devices that accept Tailscale SSH", "state: "+orNone(backend),
 			notRunning, "Connect Tailscale, then run this check again."))
 	}
+
+	// 13. TS_SSH_DISABLE_FORWARDING on the running daemon (Linux). TAILGUARD_FWD_ROOT
+	// lets tests run the Linux logic on any OS.
+	hooked := os.Getenv("TAILGUARD_FWD_ROOT") != ""
+	a.add(classifyFwd(readFwdState(), sshState, isWindows && !hooked))
 }
 
 func orNone(s string) string {

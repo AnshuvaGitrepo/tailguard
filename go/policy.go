@@ -19,7 +19,7 @@ type PolicyResult struct {
 	Findings []Finding `json:"findings"`
 }
 
-const fwdNote = "Checked Tailscale kb/1337 and kb/1193: no ssh-rule field for this. Only the node protocol has it (tailcfg.SSHAction allowLocalPortForwarding / allowRemotePortForwarding), and the policy file cannot set it."
+const fwdNote = "Tailscale's policy reference (kb/1337, kb/1193) documents no ssh-rule forwarding field. The node protocol carries per-rule flags (tailcfg.SSHAction allowLocalPortForwarding / allowRemotePortForwarding); reports say the hosted service can set them per rule, but that is undocumented. Host-level switch: TS_SSH_DISABLE_FORWARDING on tailscaled (in Tailscale's source, undocumented)."
 
 // stripHuJSON removes // and /* */ comments outside strings and trailing
 // commas before } or ], turning HuJSON into plain JSON.
@@ -90,10 +90,14 @@ func objList(v any) []map[string]any {
 	return out
 }
 
+// isBroad reports selectors that always cover many people or devices.
 func isBroad(s string) bool {
-	return s == "*" || s == "autogroup:member" || s == "autogroup:tagged" ||
-		strings.HasPrefix(s, "group:") || strings.HasPrefix(s, "tag:")
+	return s == "*" || s == "autogroup:member" || s == "autogroup:tagged" || strings.HasPrefix(s, "group:")
 }
+
+// isTag reports a tag: selector. One tag is a single pair only if exactly one
+// device carries it, which the policy file can't show, so it is a WARN.
+func isTag(s string) bool { return strings.HasPrefix(s, "tag:") }
 
 func contains(list []string, s string) bool {
 	for _, x := range list {

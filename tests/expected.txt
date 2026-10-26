@@ -16,6 +16,7 @@ risky C09E INFO
 risky C10 WARN
 risky C11 INFO
 risky C12 INFO
+risky C13 WARN
 
 safe C01 WARN
 safe C02 PASS
@@ -31,6 +32,7 @@ safe C09E INFO
 safe C10 PASS
 safe C11 INFO
 safe C12 INFO
+safe C13 INFO
 
 unknown C01 UNKNOWN
 unknown C02 PASS
@@ -45,6 +47,23 @@ unknown C09R UNKNOWN
 unknown C10 PASS
 unknown C11 UNKNOWN
 unknown C12 INFO
+unknown C13 UNKNOWN
+
+server C01 WARN
+server C02 PASS
+server C03 WARN
+server C04 PASS
+server C05 PASS
+server C06 PASS
+server C07 PASS
+server C08 PASS
+server C09 PASS
+server C09R INFO
+server C09E INFO
+server C10 PASS
+server C11 INFO
+server C12 INFO
+server C13 PASS
 
 policy-bad P-SSH-1-BROAD FAIL
 policy-bad P-SSH-1-ROOT WARN
@@ -65,7 +84,7 @@ policy-mixed P-SSH-1-FWD WARN
 policy-mixed P-SSH-2-ROOT WARN
 policy-mixed P-SSH-2-ACCEPT WARN
 policy-mixed P-SSH-2-FWD WARN
-policy-mixed P-SSH-3-BROAD FAIL
+policy-mixed P-SSH-3-TAG WARN
 policy-mixed P-SSH-3-FWD WARN
 
 policy-good P-SSH-1-FWD WARN

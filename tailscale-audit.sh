@@ -13,7 +13,7 @@
 
 set -u
 
-TOOL_VERSION="1.0.0"
+TOOL_VERSION="1.1.0"
 MIN_SAFE_VERSION="1.98.9"
 
 POLICY_FILE=""
@@ -407,6 +407,34 @@ mask_key() {
 	printf '%s****(masked)' "${1:0:10}"
 }
 
+FWD_VAR="TS_SSH_DISABLE_FORWARDING"
+
+# fwd_truthy VALUE -> true for the values tailscaled's envknob accepts as true.
+fwd_truthy() {
+	local v=$1
+	v=${v//[\"\' $'\r']/}
+	case "$v" in 1 | t | T | TRUE | true | True) return 0 ;; esac
+	return 1
+}
+
+# fwd_from_env FILE -> true if NUL- or newline-separated KEY=VALUE text turns the switch on.
+fwd_from_env() {
+	fwd_truthy "$(tr '\0' '\n' <"$1" | awk -v k="$FWD_VAR" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { print v }')"
+}
+
+# fwd_from_conf FILE -> true if a config file turns the switch on. Matches
+# TS_SSH_DISABLE_FORWARDING=1 (/etc/default) and Environment="...=1" (systemd); last wins.
+fwd_from_conf() {
+	fwd_truthy "$(tr -d '\r' <"$1" | awk -v k="$FWD_VAR=" '{
+		l = $0; sub(/^[ \t]+/, "", l)
+		if (substr(l, 1, 1) == "#") next
+		i = index(l, k); if (!i) next
+		v = substr(l, i + length(k))
+		if (match(v, /[ \t"]/)) v = substr(v, 1, RSTART - 1)
+		last = v
+	} END { print last }')"
+}
+
 # ---------------------------------------------------------------- local checks
 pick_json_backend
 
@@ -438,7 +466,7 @@ if [ -z "$TS" ]; then
 	info C01 "Tailscale installed" "Tailscale was not found on this device, so only the file search ran" "tailscale CLI not found on PATH"
 	for c in "C02:Daemon running and logged in" "C03:Tailscale SSH server" "C04:Control server" \
 		"C05:Tailnet Lock" "C06:Node key expiry" "C07:Auto-updates" "C08:Serve Unix-socket targets" \
-		"C09:App connector" "C11:Peers with Tailscale SSH"; do
+		"C09:App connector" "C11:Peers with Tailscale SSH" "C13:SSH forwarding off-switch"; do
 		unknown "${c%%:*}" "${c#*:}" "Skipped: ${c#*:} (Tailscale not found)" "skipped: tailscale CLI not found" \
 			"The tailscale command could not be found." "Install Tailscale, or put the tailscale command on PATH, then run this check again."
 	done
@@ -529,18 +557,23 @@ else
 
 	# 3. Tailscale SSH server
 	C3="Tailscale SSH server"
+	SSH_STATE=unknown # used by check 13
 	v=$(pref .RunSSH) || v=""
 	case "$v" in
 	true)
+		SSH_STATE=on
 		add L C03 WARN "$C3" "Tailscale SSH is turned on for this device" "RunSSH=true" \
 			"Other devices in your network can open a remote command line on this device through Tailscale SSH." \
 			"This is exactly what the Tailworm attack uses: one hacked device can take full (root) control of this one, then move on to the next." \
 			"https://tailscale.com/kb/1193/tailscale-ssh" "Turn off Tailscale SSH on this device if you don't need it" \
 			"First make sure you have another way in (sitting at it, or normal SSH)." \
 			"If you don't use Tailscale SSH to reach this device, turn it off: ${SUDO}tailscale set --ssh=false" \
-			"If you need it, keep the SSH rules in your policy as narrow as possible (one person to this one device)."
+			"If you need it, keep the SSH rules in your policy as narrow as possible (one person to this one device), and turn on the SSH forwarding off-switch (see the forwarding check)."
 		;;
-	false) pass C03 "$C3" "Tailscale SSH is turned off on this device" "RunSSH=false" ;;
+	false)
+		SSH_STATE=off
+		pass C03 "$C3" "Tailscale SSH is turned off on this device" "RunSSH=false"
+		;;
 	*) prefs_unknown C03 "$C3" "Could not check whether Tailscale SSH is on" RunSSH ;;
 	esac
 
@@ -559,11 +592,12 @@ else
 			IS_HEADSCALE=1
 			add L C04 WARN "$C4" "Managed by a self-hosted server (headscale?)" "ControlURL=$v" \
 				"This device is managed by $v, not by Tailscale's own service." \
-				"On headscale, SSH port forwarding can't be turned off, so anyone allowed to SSH into a device can become its administrator (root)." \
+				"On headscale, SSH port forwarding can't be turned off from the policy, so anyone allowed to SSH into a device can become its administrator (root)." \
 				"" "Treat every SSH permission as full admin access (headscale)" \
 				"Treat every SSH permission in your policy as full admin access." \
 				"Allow SSH only from one person or device to one server at a time." \
-				"For important servers, turn off Tailscale SSH and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."
+				"On every server that accepts Tailscale SSH, turn on the forwarding off-switch: $FWD_VAR=1 on tailscaled (see the forwarding check)." \
+				"For the most important servers, you can instead turn off Tailscale SSH and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."
 			;;
 		esac
 	else
@@ -620,16 +654,40 @@ else
 
 	# 7. auto-updates
 	C7="Auto-updates"
+	upd_off() { # TITLE DETAIL
+		add L C07 WARN "$C7" "$1" "$2" \
+			"Tailscale will not install security fixes by itself." \
+			"When the Tailworm fix is released, this device stays unprotected until someone updates it by hand." \
+			"https://tailscale.com/kb/1067/update" "Turn on automatic updates" \
+			"Turn on automatic updates: ${SUDO}tailscale set --auto-update"
+	}
 	if v=$(pref .AutoUpdate.Apply); then
-		if [ "$v" = "true" ]; then
-			pass C07 "$C7" "Automatic updates are on" "AutoUpdate.Apply=true"
-		else
-			add L C07 WARN "$C7" "Automatic updates are off" "AutoUpdate.Apply=$v" \
-				"Tailscale will not install security fixes by itself." \
-				"When the Tailworm fix is released, this device stays unprotected until someone updates it by hand." \
-				"https://tailscale.com/kb/1067/update" "Turn on automatic updates" \
-				"Turn on automatic updates: ${SUDO}tailscale set --auto-update"
-		fi
+		case "$v" in
+		true) pass C07 "$C7" "Automatic updates are on" "AutoUpdate.Apply=true" ;;
+		false) upd_off "Automatic updates are off" "AutoUpdate.Apply=false" ;;
+		null)
+			# Not set on the device: the tailnet-wide default applies (Self.CapMap "default-auto-update").
+			def=""
+			if [ "$STATUS_OK" -eq 1 ] && [ "$SELF_OK" -eq 1 ]; then
+				def=$(jget "$TMP/status.flat" ".Self.CapMap.default-auto-update[0]" || true)
+			fi
+			case "$def" in
+			true) pass C07 "$C7" "Automatic updates are on (tailnet default)" "AutoUpdate.Apply not set; tailnet default-auto-update=true" ;;
+			false) upd_off "Automatic updates are off (tailnet default)" "AutoUpdate.Apply not set; tailnet default-auto-update=false" ;;
+			*)
+				unknown C07 "$C7" "Automatic updates: not set on this device (using the tailnet default)" \
+					"AutoUpdate.Apply not set; tailnet default not reported" \
+					"This device follows the tailnet-wide default, and the tool couldn't read what that default is." \
+					"Turn them on for this device to be sure: ${SUDO}tailscale set --auto-update" \
+					"Or check the tailnet-wide auto-update setting in the admin console."
+				;;
+			esac
+			;;
+		*)
+			unknown C07 "$C7" "Could not check automatic updates" "AutoUpdate.Apply=$v" \
+				"Tailscale reported an unexpected value: $v" "Check it by hand: tailscale debug prefs (look for AutoUpdate)."
+			;;
+		esac
 	else
 		prefs_unknown C07 "$C7" "Could not check automatic updates" AutoUpdate.Apply
 	fi
@@ -708,6 +766,80 @@ else
 	else
 		unknown C11 "$C11" "Could not count devices that accept Tailscale SSH" "state: ${BACKEND:-none}" "$NOT_RUNNING" "$CONNECT"
 	fi
+
+	# 13. TS_SSH_DISABLE_FORWARDING on the running tailscaled. It is read by
+	# tailscaled (ssh/tailssh envknob) and checked before the policy in every TCP
+	# and Unix-socket forwarding callback; undocumented, a stopgap for Tailworm.
+	# TAILGUARD_FWD_ROOT (tests) replaces "/": ROOT/environ stands for the
+	# daemon's environment and config files are read under ROOT/etc/...
+	FWD_FOUND=0 FWD_READ=0 FWD_ACTIVE=0 FWD_CONF=""
+	if [ -n "${TAILGUARD_FWD_ROOT:-}" ]; then
+		froot=$TAILGUARD_FWD_ROOT
+		if [ -e "$froot" ]; then
+			FWD_FOUND=1
+			if [ -f "$froot/environ" ] && [ -r "$froot/environ" ]; then
+				FWD_READ=1
+				fwd_from_env "$froot/environ" && FWD_ACTIVE=1
+			fi
+		fi
+	else
+		froot=""
+		for c in /proc/[0-9]*/comm; do
+			[ "$(cat "$c" 2>/dev/null)" = tailscaled ] || continue
+			FWD_FOUND=1
+			if [ -r "${c%/comm}/environ" ] && tr '\0' '\n' <"${c%/comm}/environ" >"$TMP/fwdenv" 2>/dev/null; then
+				FWD_READ=1
+				fwd_from_env "$TMP/fwdenv" && FWD_ACTIVE=1
+			fi
+			break
+		done
+	fi
+	for c in "$froot/etc/default/tailscaled" "$froot/etc/sysconfig/tailscaled" \
+		"$froot"/etc/systemd/system/tailscaled.service.d/*.conf \
+		"$froot"/run/systemd/system/tailscaled.service.d/*.conf \
+		"$froot"/lib/systemd/system/tailscaled.service.d/*.conf; do
+		[ -f "$c" ] && [ -r "$c" ] && fwd_from_conf "$c" && FWD_CONF=$c
+	done
+	C13="SSH forwarding off-switch"
+	FWD_HELP="https://github.com/tailscale/tailscale/blob/main/ssh/tailssh/tailssh.go"
+	FWD_S1="First make sure you have another way in (console or normal SSH) in case tailscaled doesn't come back."
+	FWD_S3="Restart it: sudo systemctl daemon-reload && sudo systemctl restart tailscaled"
+	if [ "$FWD_READ" -eq 1 ] && [ "$FWD_ACTIVE" -eq 1 ]; then
+		pass C13 "$C13" "SSH forwarding off-switch is on ($FWD_VAR)" "running tailscaled has $FWD_VAR set to true"
+	elif [ "$FWD_READ" -eq 1 ] && [ -n "$FWD_CONF" ]; then
+		add L C13 WARN "$C13" "SSH forwarding off-switch is set but not active yet" \
+			"set in $FWD_CONF; not in the running tailscaled's environment" \
+			"It is set in $FWD_CONF, but the running tailscaled doesn't have it, so forwarding is still allowed." \
+			"The setting only takes effect when tailscaled starts." \
+			"$FWD_HELP" "Restart tailscaled so the forwarding off-switch takes effect" \
+			"$FWD_S1" "$FWD_S3" "Run this check again to confirm."
+	elif [ "$FWD_READ" -eq 1 ] && [ "$SSH_STATE" = on ]; then
+		add L C13 WARN "$C13" "Tailscale SSH is on and SSH forwarding is allowed" \
+			"$FWD_VAR not set in the running tailscaled" \
+			"This device accepts Tailscale SSH and nothing on the device blocks port forwarding through it." \
+			"Tailworm uses SSH port forwarding to reach hidden services on the device and become root." \
+			"$FWD_HELP" "Turn on the SSH forwarding off-switch on this server" \
+			"$FWD_S1" \
+			"Create the file /etc/systemd/system/tailscaled.service.d/50-disable-ssh-forwarding.conf with two lines: [Service] and Environment=$FWD_VAR=1" \
+			"$FWD_S3" \
+			"Note: this is an undocumented Tailscale setting (a stopgap until the fix ships). It blocks TCP and Unix-socket forwarding, not SSH agent forwarding."
+	elif [ "$SSH_STATE" = off ] && [ "$FWD_FOUND" -eq 1 ]; then
+		info C13 "$C13" "SSH forwarding off-switch: not needed now (Tailscale SSH is off)" "$FWD_VAR not active" \
+			"If you ever turn Tailscale SSH on for this device, turn this switch on too."
+	elif [ "$FWD_FOUND" -eq 0 ]; then
+		unknown C13 "$C13" "Could not check the SSH forwarding off-switch" "tailscaled process not found" \
+			"The tailscaled process wasn't found, so its settings couldn't be read." \
+			"Make sure tailscaled is running: sudo systemctl status tailscaled" "Then run this check again with sudo."
+	elif [ "$FWD_READ" -eq 0 ]; then
+		problem="The running tailscaled's settings can only be read with admin rights."
+		[ -n "$FWD_CONF" ] && problem="$problem It is set in $FWD_CONF, but whether tailscaled has picked it up is unknown."
+		unknown C13 "$C13" "Could not check the SSH forwarding off-switch" "tailscaled environment not readable (not root)" \
+			"$problem" "Run this check again with sudo."
+	else
+		unknown C13 "$C13" "Could not check the SSH forwarding off-switch" "$FWD_VAR not set; RunSSH unknown" \
+			"The forwarding off-switch isn't set, and the tool couldn't tell whether Tailscale SSH is on." \
+			"Check by hand: tailscale debug prefs (look for RunSSH)." "If it is true, turn on the off-switch as described in the README."
+	fi
 fi
 
 # 10. auth keys on disk (works without the tailscale CLI too)
@@ -725,6 +857,10 @@ GREP_I=""
 grep -I x /dev/null >/dev/null 2>&1
 [ $? -le 1 ] && GREP_I="-I"
 : >"$TMP/keys"
+# 60 s per folder, like the Go tool, so a huge /root can't make it look stuck.
+LIMIT=()
+timeout 1 true >/dev/null 2>&1 && LIMIT=(timeout 60)
+SCAN_INCOMPLETE=()
 progress "Scanning for auth keys"
 for p in "${SCAN[@]}"; do
 	[ -e "$p" ] || continue
@@ -734,11 +870,16 @@ for p in "${SCAN[@]}"; do
 		continue
 	fi
 	# shellcheck disable=SC2086 # GREP_I is empty or one flag
-	grep -rsoE $GREP_I --exclude-dir=.cache --exclude-dir=node_modules --exclude-dir=.git \
+	"${LIMIT[@]+"${LIMIT[@]}"}" grep -rsoE $GREP_I --exclude-dir=.cache --exclude-dir=node_modules --exclude-dir=.git \
 		'tskey-[A-Za-z0-9_-]{8,}' "$p" >>"$TMP/keys" 2>/dev/null
+	[ $? -eq 124 ] && SCAN_INCOMPLETE+=("$p")
 done
 if [ "$IS_ROOT" -eq 0 ] && [ -z "${TAILGUARD_SCAN_ROOTS:-}" ]; then
 	SKIPPED+=("unreadable files under /etc /root /var/spool/cron (not root)")
+fi
+if [ "${#SCAN_INCOMPLETE[@]}" -gt 0 ]; then
+	inc=$(printf '%s, ' "${SCAN_INCOMPLETE[@]}")
+	SKIPPED+=("auth-key scan hit the 1m0s limit in ${inc%, }")
 fi
 C10="Auth keys on disk"
 if [ -s "$TMP/keys" ]; then
@@ -757,6 +898,12 @@ if [ -s "$TMP/keys" ]; then
 		"Revoke each key in the admin console: https://login.tailscale.com/admin/settings/keys" \
 		"Delete the key from the files listed above." \
 		"Next time, use a one-off or ephemeral key, or keep keys in a password or secret manager."
+elif [ "${#SCAN_INCOMPLETE[@]}" -gt 0 ]; then
+	inc=$(printf '%s, ' "${SCAN_INCOMPLETE[@]}")
+	unknown C10 "$C10" "The search for saved login keys did not finish" "none found, but the scan did not finish in: ${inc%, }" \
+		"No keys were found, but these folders were too big to search completely: ${inc%, }" \
+		"Search them by hand (this can take a while): sudo grep -rl 'tskey-' ${SCAN_INCOMPLETE[*]}" \
+		"If it finds anything other than this tool's own test files, revoke and delete those keys."
 else
 	pass C10 "$C10" "No Tailscale login keys found saved in files" "no tskey- strings found in the searched paths"
 fi
@@ -773,12 +920,16 @@ else
 fi
 
 # ---------------------------------------------------------------- policy audit
-is_broad() { # value -> true if broad
+is_broad() { # value -> true for selectors that always cover many people or devices
 	case "$1" in
-	"*" | autogroup:member | autogroup:tagged | group:* | tag:*) return 0 ;;
+	"*" | autogroup:member | autogroup:tagged | group:*) return 0 ;;
 	esac
 	return 1
 }
+
+# is_tag VALUE -> one tag is a single pair only if exactly one device carries
+# it, which the policy file can't show, so it is a WARN, not a FAIL.
+is_tag() { case "$1" in tag:*) return 0 ;; esac; return 1; }
 
 # plain_name VALUE [dst] -> the selector in words
 plain_name() {
@@ -846,7 +997,7 @@ plain_action() {
 
 padd() { add P "$@"; }
 
-FWD_NOTE="Checked Tailscale kb/1337 and kb/1193: no ssh-rule field for this. Only the node protocol has it (tailcfg.SSHAction allowLocalPortForwarding / allowRemotePortForwarding), and the policy file cannot set it."
+FWD_NOTE="Tailscale's policy reference (kb/1337, kb/1193) documents no ssh-rule forwarding field. The node protocol carries per-rule flags (tailcfg.SSHAction allowLocalPortForwarding / allowRemotePortForwarding); reports say the hosted service can set them per rule, but that is undocumented. Host-level switch: TS_SSH_DISABLE_FORWARDING on tailscaled (in Tailscale's source, undocumented)."
 
 if [ -n "$POLICY_FILE" ]; then
 	progress "Auditing policy file"
@@ -876,12 +1027,27 @@ if [ -n "$POLICY_FILE" ]; then
 		RULE_SUMMARY+=("$summary")
 		RULE_JSON+=("{\"index\": $n, \"src\": $(ja "${src[@]+"${src[@]}"}"), \"dst\": $(ja "${dst[@]+"${dst[@]}"}"), \"users\": $(ja "${users[@]+"${users[@]}"}"), \"action\": \"$(json_esc "$action")\", \"summary\": \"$(json_esc "$summary")\"}")
 
-		broad=""
-		for x in "${src[@]+"${src[@]}"}"; do is_broad "$x" && broad="$broad src:$x"; done
-		for x in "${dst[@]+"${dst[@]}"}"; do is_broad "$x" && broad="$broad dst:$x"; done
-		[ "${#src[@]}" -gt 1 ] && broad="$broad ${#src[@]}-sources"
-		[ "${#dst[@]}" -gt 1 ] && broad="$broad ${#dst[@]}-destinations"
-		if [ -n "$broad" ]; then
+		# broad lists everything wide (tags too, for the details line); hard is
+		# set by anything other than a single tag, which makes the rule a FAIL.
+		broad="" tags="" hard=0
+		for x in "${src[@]+"${src[@]}"}"; do
+			if is_broad "$x"; then broad="$broad src:$x" hard=1; elif is_tag "$x"; then broad="$broad src:$x" tags="$tags src:$x"; fi
+		done
+		for x in "${dst[@]+"${dst[@]}"}"; do
+			if is_broad "$x"; then broad="$broad dst:$x" hard=1; elif is_tag "$x"; then broad="$broad dst:$x" tags="$tags dst:$x"; fi
+		done
+		[ "${#src[@]}" -gt 1 ] && broad="$broad ${#src[@]}-sources" hard=1
+		[ "${#dst[@]}" -gt 1 ] && broad="$broad ${#dst[@]}-destinations" hard=1
+		if [ "$hard" -eq 0 ] && [ -n "$tags" ]; then
+			padd "P-SSH-$n-TAG" WARN "ssh rule #$n uses a tag" "SSH rule $n uses a tag: make sure only one device has it" \
+				"src=[$s_txt] dst=[$d_txt]; tag:$tags" \
+				"It lets $who log in to $where. That is a single person-to-device pair only if exactly one device has this tag." \
+				"If several devices share the tag, one hacked device can use this rule to reach all of them." \
+				"" "Check that the tag in SSH rule $n is on only one device" \
+				"In the admin console (Machines), filter by this tag and check that only one device has it." \
+				"If several do, give the server its own tag (for example tag:web-01) and use that in this rule."
+		fi
+		if [ "$hard" -eq 1 ]; then
 			problem="It lets $who log in to $where."
 			if [ "${#dst[@]}" -eq 1 ] && [ "${dst[0]}" = "autogroup:self" ]; then
 				problem="$problem Each person can only reach devices they own, so this is Tailscale's default and lower risk than most broad rules, but it is still more than one person-to-device pair."
@@ -892,7 +1058,7 @@ if [ -n "$POLICY_FILE" ]; then
 				"" "Delete or narrow SSH rule $n" \
 				"If you don't use Tailscale SSH (see the 'devices accept Tailscale SSH' line in this report), delete this rule from the \"ssh\" section of your policy." \
 				"If you do use it, replace it with one rule for each person and the one device they need, for example: {\"action\": \"check\", \"src\": [\"you@example.com\"], \"dst\": [\"tag:my-server\"], \"users\": [\"autogroup:nonroot\"]}" \
-				"Note: this check also flags any tag: or group: in a rule, because one tag or group can cover many devices or people."
+				"A rule with one person and one tag like this only gets a lighter warning, as long as exactly one device has that tag."
 		fi
 		for x in "${users[@]+"${users[@]}"}"; do
 			if [ "$x" = "root" ]; then
@@ -914,12 +1080,13 @@ if [ -n "$POLICY_FILE" ]; then
 				"Optionally add \"checkPeriod\": \"1h\" so the confirmation is asked again every hour."
 		fi
 		GROUP=fwd REF="SSH rule $n"
-		padd "P-SSH-$n-FWD" WARN "ssh rule #$n cannot disable port forwarding" "SSH port forwarding can't be blocked from your policy" "$FWD_NOTE" \
-			"Tailscale's policy file has no setting to block SSH port forwarding (checked in Tailscale's documentation on 26 Oct 2026)." \
-			"So anyone these SSH rules let in can tunnel to hidden services on the device. Tailworm uses this to become root." \
-			"" "Keep SSH rules narrow; on important servers use OpenSSH with forwarding turned off" \
+		padd "P-SSH-$n-FWD" WARN "ssh rule #$n cannot disable port forwarding" "SSH port forwarding isn't controlled by any documented policy setting" "$FWD_NOTE" \
+			"Tailscale's documented policy settings can't block SSH port forwarding (checked 26-27 Oct 2026). Reports say the hosted service has a per-rule switch, but it isn't documented yet." \
+			"So assume anyone these SSH rules let in can tunnel to hidden services on the device. Tailworm uses this to become root." \
+			"" "Keep SSH rules narrow and turn on the SSH forwarding off-switch on servers" \
 			"Treat every SSH rule as if it gives full admin access, and keep each one as narrow as possible." \
-			"For important servers, turn off Tailscale SSH on them (${SUDO}tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."
+			"On every Linux server that accepts Tailscale SSH, turn on the forwarding off-switch: $FWD_VAR=1 on tailscaled (see the forwarding check when you run this tool there)." \
+			"For the most important servers, you can instead turn off Tailscale SSH (${SUDO}tailscale set --ssh=false) and use normal OpenSSH with 'AllowTcpForwarding no' and 'AllowStreamLocalForwarding no' in sshd_config."
 		GROUP="" REF=""
 	done
 

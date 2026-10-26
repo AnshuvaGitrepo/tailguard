@@ -1,0 +1,18 @@
+{
+  "Version": "1.104.2-t2222222-g2222222",
+  "BackendState": "Running",
+  "Self": {
+    "HostName": "app-server",
+    "OS": "linux",
+    "Online": true,
+    "KeyExpiry": "2027-03-01T08:00:00Z",
+    "CapMap": {
+      "default-auto-update": [true],
+      "https://tailscale.com/cap/ssh": []
+    }
+  },
+  "Peer": {
+    "nodekey:aaaa": {"HostName": "laptop", "OS": "windows", "Online": true},
+    "nodekey:bbbb": {"HostName": "backup", "OS": "linux", "Online": true, "sshHostKeys": ["ssh-ed25519 AAAAC3NzaBACKUP"]}
+  }
+}

@@ -1,0 +1,8 @@
+{
+	"ControlURL": "https://controlplane.tailscale.com",
+	"RunSSH": true,
+	"WantRunning": true,
+	"AdvertiseRoutes": null,
+	"AutoUpdate": {"Check": true, "Apply": null},
+	"AppConnector": {"Advertise": false}
+}

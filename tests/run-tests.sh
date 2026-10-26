@@ -44,8 +44,10 @@ run_tool() { # fixture policy outdir -> exit code
 	local args=(--no-color --out "$(winpath "$out")")
 	[ -n "$pol" ] && args+=(--policy "$(winpath "$HERE/policies/$pol.hujson")")
 	export FAKE_TS_DIR="$HERE/fixtures/$fx" FAKE_TS_LOG="$out/calls.log"
-	export TAILGUARD_SCAN_ROOTS
+	export TAILGUARD_SCAN_ROOTS TAILGUARD_FWD_ROOT
 	TAILGUARD_SCAN_ROOTS=$(winpath "$(make_scanroot "$fx")")
+	# stands in for the running tailscaled (environ) and /etc; missing = daemon not found
+	TAILGUARD_FWD_ROOT=$(winpath "$HERE/fixtures/$fx/fwd")
 	if [ "$MODE" = sh ]; then
 		TAILGUARD_TAILSCALE="$HERE/fake-tailscale/tailscale" TAILGUARD_JSON="${BACKEND:-}" \
 			bash "$ROOT/tailscale-audit.sh" "${args[@]}" >"$out/console.txt" 2>&1
@@ -128,7 +130,7 @@ if [ "$MODE" = compare ]; then
 	# Fixed parser: auto-detect may call a python3 stub (Windows Store alias) that can hang.
 	BACKEND="awk"
 	echo "== same wording: tailscale-audit.sh vs $TOOL =="
-	for c in risky: safe: unknown: safe:bad safe:mixed safe:good; do
+	for c in risky: safe: unknown: server: safe:bad safe:mixed safe:good; do
 		fx=${c%%:*} pol=${c#*:}
 		out=$(mktemp -d)
 		MODE="sh" run_tool "$fx" "$pol" "$out"
@@ -168,8 +170,9 @@ esac
 check_case risky risky "" 1
 check_case safe safe "" 0
 check_case unknown unknown "" 0
+check_case server server "" 0
 check_case policy-bad safe bad 1
-check_case policy-mixed safe mixed 1
+check_case policy-mixed safe mixed 0
 check_case policy-good safe good 0
 
 # tool errors -> exit 2

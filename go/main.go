@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	toolVersion    = "1.0.0"
+	toolVersion    = "1.1.0"
 	minSafeVersion = "1.98.9"
 )
 
