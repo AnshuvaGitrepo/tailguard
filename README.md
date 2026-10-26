@@ -212,6 +212,20 @@ Sample policies: `bad`, `mixed` and `good`. Expected results are in
 (stands in for `/`: `ROOT/environ` is the daemon's environment, config files are read
 under `ROOT/etc/...`), and `TAILGUARD_JSON` (bash only: `jq|python|awk`).
 
+## Contributing
+
+Pull requests are welcome. A few rules keep the two tools trustworthy:
+
+- **Read-only, always.** Only the 5 read-only `tailscale` commands above. The test fakes refuse anything else.
+- **Never guess.** If a command or field is missing, report UNKNOWN, never PASS.
+- **Same words in both tools.** Change the Go text and the matching line in `tailscale-audit.sh` together. The
+  `compare` suite fails on any difference (only `sudo ` and Windows-vs-Linux commands may differ).
+- **Every problem needs** a plain title, a "problem" text and at least one fix step (the tests check this).
+- **New check?** Give it the next ID (C14), add fixture data and its expected status for every fixture in
+  `tests/expected.txt`, and add a row to the table above.
+- **New script?** Mark it executable in git: `git update-index --chmod=+x <file>`.
+- Run all five test suites, `go vet`, `go test` and shellcheck before opening the PR.
+
 ## Walkthrough
 
 [`docs/tailguard-guide.pdf`](docs/tailguard-guide.pdf) is an illustrated 11-page guide.
