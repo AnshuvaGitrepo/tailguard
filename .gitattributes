@@ -1,0 +1,4 @@
+# Keep LF everywhere so the bash scripts run on Linux after a clone from Windows.
+* text=auto eol=lf
+*.pdf binary
+*.svg text eol=lf

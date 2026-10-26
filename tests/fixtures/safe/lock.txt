@@ -1,0 +1,3 @@
+Tailnet Lock is ENABLED.
+
+This node is accessible under Tailnet Lock.

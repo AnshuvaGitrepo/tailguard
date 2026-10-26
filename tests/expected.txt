@@ -1,0 +1,72 @@
+# Expected findings. Format: <case> <id> <status>
+# Local cases list every check. Policy cases list the exact set of policy
+# findings: an extra or missing policy finding fails the test.
+
+risky C01 FAIL
+risky C02 PASS
+risky C03 WARN
+risky C04 WARN
+risky C05 FAIL
+risky C06 WARN
+risky C07 WARN
+risky C08 FAIL
+risky C09 WARN
+risky C09R INFO
+risky C09E INFO
+risky C10 WARN
+risky C11 INFO
+risky C12 INFO
+
+safe C01 WARN
+safe C02 PASS
+safe C03 PASS
+safe C04 PASS
+safe C05 PASS
+safe C06 PASS
+safe C07 PASS
+safe C08 PASS
+safe C09 PASS
+safe C09R INFO
+safe C09E INFO
+safe C10 PASS
+safe C11 INFO
+safe C12 INFO
+
+unknown C01 UNKNOWN
+unknown C02 PASS
+unknown C03 UNKNOWN
+unknown C04 UNKNOWN
+unknown C05 UNKNOWN
+unknown C06 UNKNOWN
+unknown C07 UNKNOWN
+unknown C08 UNKNOWN
+unknown C09 UNKNOWN
+unknown C09R UNKNOWN
+unknown C10 PASS
+unknown C11 UNKNOWN
+unknown C12 INFO
+
+policy-bad P-SSH-1-BROAD FAIL
+policy-bad P-SSH-1-ROOT WARN
+policy-bad P-SSH-1-ACCEPT WARN
+policy-bad P-SSH-1-FWD WARN
+policy-bad P-SSH-2-BROAD FAIL
+policy-bad P-SSH-2-ROOT WARN
+policy-bad P-SSH-2-ACCEPT WARN
+policy-bad P-SSH-2-FWD WARN
+policy-bad P-SSH-3-BROAD FAIL
+policy-bad P-SSH-3-FWD WARN
+policy-bad P-APPC-nodeAttrs-1 WARN
+policy-bad P-APPC-grants-2 WARN
+policy-bad P-ACL-1-ALLOWALL WARN
+policy-bad P-GRANT-1-ALLOWALL WARN
+
+policy-mixed P-SSH-1-FWD WARN
+policy-mixed P-SSH-2-ROOT WARN
+policy-mixed P-SSH-2-ACCEPT WARN
+policy-mixed P-SSH-2-FWD WARN
+policy-mixed P-SSH-3-BROAD FAIL
+policy-mixed P-SSH-3-FWD WARN
+
+policy-good P-SSH-1-FWD WARN
+policy-good P-SSH-2-FWD WARN

@@ -1,0 +1,24 @@
+# Allow-list: only the files below are published. Everything else stays local,
+# so private files (reports, policy, private docs) can't be committed by mistake.
+*
+!.gitignore
+!.gitattributes
+!LICENSE
+!README.md
+!CHANGELOG.md
+!build.sh
+!tailscale-audit.sh
+
+!go/
+!go/**
+!tests/
+!tests/**
+!docs/
+!docs/logo.svg
+!docs/tailguard-guide.pdf
+
+# Never publish, even inside allowed folders
+tests/.scan/
+tests/fakets/*.exe
+tests/fakets/tailscale
+*.exe

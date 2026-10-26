@@ -1,0 +1,37 @@
+// BAD policy: everything Tailworm loves.
+{
+	/* allow-all ACL, left over from the default policy */
+	"acls": [
+		{"action": "accept", "src": ["*"], "dst": ["*:*"]},
+	],
+	"tagOwners": {
+		"tag:prod": ["autogroup:admin"], // trailing comma below on purpose
+		"tag:web":  ["autogroup:admin"],
+	},
+	"nodeAttrs": [
+		{
+			"target": ["*"],
+			"app": {
+				"tailscale.com/app-connectors": [
+					{"name": "github", "connectors": ["tag:connector"], "domains": ["github.com", "*.github.com"]},
+				],
+			},
+		},
+	],
+	"grants": [
+		{"src": ["*"], "dst": ["*"], "ip": ["*"]},
+		{
+			"src": ["group:devs"],
+			"dst": ["tag:connector"],
+			"app": {"tailscale.com/app-connectors": [{"name": "internal", "routes": ["10.1.0.0/16"]}]},
+		},
+	],
+	"ssh": [
+		// 1: every member can be root on prod, no re-auth
+		{"action": "accept", "src": ["autogroup:member"], "dst": ["tag:prod"], "users": ["root", "autogroup:nonroot"]},
+		// 2: wildcard source
+		{"action": "accept", "src": ["*"], "dst": ["tag:web"], "users": ["root"]},
+		// 3: many-to-many, URL in a string must survive comment stripping
+		{"action": "check", "src": ["group:devs", "alice@example.com"], "dst": ["tag:web", "tag:db"], "users": ["ubuntu"], "note": "see https://example.com/runbook"},
+	],
+}

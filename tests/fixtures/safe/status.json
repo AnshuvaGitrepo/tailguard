@@ -1,0 +1,14 @@
+{
+  "Version": "1.104.2-t1111111-g1111111",
+  "BackendState": "Running",
+  "Self": {
+    "HostName": "safe-01",
+    "OS": "linux",
+    "Online": true,
+    "KeyExpiry": "2027-04-20T10:00:00Z"
+  },
+  "Peer": {
+    "nodekey:eeee": {"HostName": "phone", "OS": "android", "Online": true},
+    "nodekey:ffff": {"HostName": "nas", "OS": "linux", "Online": true}
+  }
+}

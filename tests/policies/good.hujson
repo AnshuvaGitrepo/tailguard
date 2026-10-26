@@ -1,0 +1,13 @@
+// GOOD policy: narrow pairs, check mode, no root, no app connectors.
+{
+	"acls": [
+		{"action": "accept", "src": ["group:devs"], "dst": ["tag:web:443"]},
+	],
+	"grants": [
+		{"src": ["group:ops"], "dst": ["tag:db"], "ip": ["5432"]},
+	],
+	"ssh": [
+		{"action": "check", "src": ["alice@example.com"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot"], "checkPeriod": "1h"},
+		{"action": "check", "src": ["bob@example.com"],   "dst": ["autogroup:self"], "users": ["bob"]},
+	],
+}

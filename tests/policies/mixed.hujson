@@ -1,0 +1,17 @@
+// MIXED policy: some good rules, some risky ones.
+{
+	"acls": [
+		{"action": "accept", "src": ["group:devs"], "dst": ["tag:web:443"]},
+	],
+	"nodeAttrs": [
+		{"target": ["tag:web"], "attr": ["funnel"]},
+	],
+	"ssh": [
+		// 1: good - one user to their own devices, check mode, no root
+		{"action": "check", "src": ["alice@example.com"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot"]},
+		// 2: single pair but root + accept
+		{"action": "accept", "src": ["bob@example.com"], "dst": ["autogroup:self"], "users": ["root"]},
+		// 3: one user, but to a whole tag
+		{"action": "check", "src": ["carol@example.com"], "dst": ["tag:db"], "users": ["postgres"], "checkPeriod": "1h"},
+	],
+}

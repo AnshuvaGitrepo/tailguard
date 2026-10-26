@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fake tailscale CLI for tests. Serves canned output from $FAKE_TS_DIR
+# (one of tests/fixtures/*). A missing fixture file makes the command fail,
+# like an old CLI without that subcommand.
+
+set -u
+d="${FAKE_TS_DIR:?set FAKE_TS_DIR to a fixtures folder}"
+[ -n "${FAKE_TS_LOG:-}" ] && echo "$*" >>"$FAKE_TS_LOG"
+
+serve() {
+	if [ -f "$d/$1" ]; then
+		cat "$d/$1"
+	else
+		echo "tailscale: unknown subcommand or not available" >&2
+		exit 1
+	fi
+}
+
+case "$*" in
+version) serve version.txt ;;
+"status --json") serve status.json ;;
+"debug prefs") serve prefs.json ;;
+"serve status --json") serve serve.json ;;
+"lock status") serve lock.txt ;;
+*)
+	echo "fake tailscale: refusing unexpected command: $*" >&2
+	exit 99
+	;;
+esac

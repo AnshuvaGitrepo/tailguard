@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="tailguard">
+  <defs>
+    <linearGradient id="tg-shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <linearGradient id="tg-badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <!-- shield -->
+  <path d="M64 6 L112 24 V60 C112 90 92 112 64 122 C36 112 16 90 16 60 V24 Z" fill="url(#tg-shield)"/>
+  <path d="M64 15 L104 30 V60 C104 85 87 104 64 113 C41 104 24 85 24 60 V30 Z" fill="none" stroke="#ffffff" stroke-opacity=".25" stroke-width="2"/>
+  <!-- network: four devices linked through a hub -->
+  <g stroke="#e0e7ff" stroke-width="4" stroke-linecap="round">
+    <line x1="64" y1="62" x2="42" y2="42"/>
+    <line x1="64" y1="62" x2="86" y2="42"/>
+    <line x1="64" y1="62" x2="42" y2="84"/>
+    <line x1="64" y1="62" x2="86" y2="84"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="42" cy="42" r="8"/>
+    <circle cx="86" cy="42" r="8"/>
+    <circle cx="42" cy="84" r="8"/>
+    <circle cx="86" cy="84" r="8"/>
+  </g>
+  <circle cx="64" cy="62" r="11" fill="#c7d2fe" stroke="#ffffff" stroke-width="3"/>
+  <!-- check badge -->
+  <circle cx="98" cy="98" r="20" fill="url(#tg-badge)" stroke="#ffffff" stroke-width="4"/>
+  <path d="M89 98 L96 105 L108 92" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

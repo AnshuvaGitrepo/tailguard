@@ -1,0 +1,3 @@
+Tailnet Lock is NOT enabled.
+
+This node's tailnet-lock key: tlpub:1111
