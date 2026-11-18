@@ -234,5 +234,10 @@ and an example result.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Tailscale is a trademark of Tailscale Inc.
+[MIT](LICENSE) © 2026 AnshuvaGitrepo. Tailscale is a trademark of Tailscale Inc.
 This project isn't affiliated with or endorsed by Tailscale.
+
+<p align="center">
+  <img src="docs/logo.svg" alt="tailguard logo" width="72"><br>
+  <sub>Prepared by Anshuva Samanta</sub>
+</p>
